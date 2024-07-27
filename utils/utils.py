@@ -118,7 +118,7 @@ def load_mat(fn='input_graphs/SuiteSparse Matrix Collection/grid1_dual.mat'):
 
     mat_data = io.loadmat(fn)
     adj = mat_data['Problem']['A'][0][0]
-    G = nx.convert_matrix.from_numpy_matrix(adj.toarray())
+    G = nx.convert_matrix.from_numpy_array(adj.toarray())
     return G
 
 

@@ -28,7 +28,6 @@ import matplotlib.pyplot as plt
 # from matplotlib import collections  as mc
 # from mpl_toolkits.mplot3d.art3d import Line3DCollection
 plt.style.use('ggplot')
-plt.style.use('seaborn-colorblind')
 
 
 ## sys
