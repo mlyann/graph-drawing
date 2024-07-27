@@ -358,6 +358,13 @@ class GD2:
                     loss += l
 #                     self.grad_clamp(l, c, weight, optimizer, ref)
 
+                elif c == 'vertex_resolution':  # Replacing the original vertex_resolution
+                    sample = self.sample(c)
+                    radii = self._initialize_radii()  # Ensure radii are initialized
+                    l = weight * C.node_overlap(
+                        pos, radii, sample_size=sample_sizes[c], sample=sample
+                    )
+                    loss += l
 
                 else:
                     print(f'Criteria not supported: {c}')
@@ -644,3 +651,4 @@ class GD2:
                 qualities_by_time = self.qualities_by_time,
             ), f)
         
+    

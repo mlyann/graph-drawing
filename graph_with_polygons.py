@@ -1,3 +1,5 @@
+# graph_with_polygons.py
+
 import torch
 import networkx as nx
 import numpy as np
@@ -46,18 +48,6 @@ def draw_graph_with_polygons(graph: GraphWithPolygons, points: torch.Tensor, n_s
     plt.axis('equal')
     plt.axis('off')
     plt.show()
-
-def compute_stress(pos: torch.Tensor, graph: nx.Graph, node_mapping: dict) -> torch.Tensor:
-    n = pos.shape[0]
-    stress = 0
-    for i in range(n):
-        for j in range(i + 1, n):
-            d_ij = torch.dist(pos[i], pos[j])
-            node_i = list(node_mapping.keys())[i]
-            node_j = list(node_mapping.keys())[j]
-            graph_dist = nx.shortest_path_length(graph, source=node_i, target=node_j)
-            stress += (d_ij - graph_dist) ** 2
-    return stress
 
 def node_overlap_loss(pos: torch.Tensor, radii: torch.Tensor, sample_size=None, sample=None) -> torch.Tensor:
     pairwise_distance = nn.PairwiseDistance()

@@ -428,4 +428,25 @@ def stress(pos, D, W, sampleSize=None, sample=None, reduce='mean'):
 
 
 
+def node_overlap(pos, radii, sample_size=None, sample=None):
+    pairwise_distance = nn.PairwiseDistance()
+    relu = nn.ReLU()
 
+    n = pos.shape[0]
+    if sample is None:
+        if sample_size is None or sample_size == 'full':
+            indices = torch.arange(n)
+        else:
+            indices = torch.randperm(n)[:sample_size]
+        sample = torch.cartesian_prod(indices, indices)
+
+    a = pos[sample[:, 0]]
+    b = pos[sample[:, 1]]
+    radii_a = radii[sample[:, 0]]
+    radii_b = radii[sample[:, 1]]
+    pdist = pairwise_distance(a, b)
+
+    normalized_dist = pdist / (radii_a + radii_b)
+    loss = relu(1 - normalized_dist).pow(2).mean()
+
+    return loss
