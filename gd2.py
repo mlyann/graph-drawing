@@ -17,130 +17,80 @@ from torch.utils.data import DataLoader
 import pickle as pkl
 
 
-        
-        
-def is_interactive():
-    import __main__ as main
-    return not hasattr(main, '__file__')
-
-if is_interactive():
-    from tqdm.notebook import tqdm
-    from IPython import display
-else:
-    from tqdm import tqdm
-    display = None
-
-
-
-##TODO custom lr_scheduler, linear slowdown on plateau 
-
 class GD2:
     def __init__(self, G, device='cpu'):
         self.G = G
-        
-        
         self.D, self.adj_sparse, self.k2i = utils.shortest_path(G)
-        
-        self.adj = torch.from_numpy((self.adj_sparse+self.adj_sparse.T).toarray())
+        self.adj = torch.from_numpy((self.adj_sparse + self.adj_sparse.T).toarray())
         self.D = torch.from_numpy(self.D)
-        self.i2k = {i:k for k,i in self.k2i.items()}
-        self.W = 1/(self.D**2+1e-6)
-#         self.W = 1/(self.D**1.3+1e-6)
-#         self.W = 1/(self.D**0.5+1e-6)
-
+        self.i2k = {i: k for k, i in self.k2i.items()}
+        self.W = 1 / (self.D**2 + 1e-6)
         self.degrees = np.array([self.G.degree(self.i2k[i]) for i in range(len(self.G))])
         self.maxDegree = max(dict(self.G.degree).values())
-
-        self.edge_indices = [(self.k2i[e0], self.k2i[e1]) for e0,e1 in self.G.edges]
+        self.edge_indices = [(self.k2i[e0], self.k2i[e1]) for e0, e1 in self.G.edges]
         self.node_indices = range(len(self.G))
         self.node_index_pairs = np.c_[
             np.repeat(self.node_indices, len(self.G)),
             np.tile(self.node_indices, len(self.G))
         ]
-        self.node_index_pairs = self.node_index_pairs[self.node_index_pairs[:,0]<self.node_index_pairs[:,1]]
-        
+        self.node_index_pairs = self.node_index_pairs[self.node_index_pairs[:, 0] < self.node_index_pairs[:, 1]]
         self.node_edge_pairs = list(itertools.product(self.node_indices, self.edge_indices))
-        
-        
         incident_edge_groups = [
-            [(G.degree(k), self.k2i[k], self.k2i[n])
-            for n in G.neighbors(k)]
+            [(G.degree(k), self.k2i[k], self.k2i[n]) for n in G.neighbors(k)]
             for k in G.nodes
         ]
-        
         incident_edge_pairs = [
-            [
-                (i[0],)+i[1:]+j[1:] 
-                for i,j in itertools.product(ieg, ieg) 
-                if i<j
-            ] 
+            [(i[0],) + i[1:] + j[1:] for i, j in itertools.product(ieg, ieg) if i < j]
             for ieg in incident_edge_groups
         ]
         self.incident_edge_pairs = sum(incident_edge_pairs, [])
-
-
-        ## init
-#         self.pos = torch.randn(len(self.G.nodes), 2, device=device).requires_grad_(True)
-#         self.pos = (0.5*len(self.G.nodes)**0.5) * torch.randn(len(self.G.nodes), 2, device=device)
-        self.pos = (len(self.G.nodes)**0.5) * torch.randn(len(self.G.nodes), 2, device=device)
+        self.pos = (len(self.G.nodes) ** 0.5) * torch.randn(len(self.G.nodes), 2, device=device)
         self.pos = self.pos.requires_grad_(True)
-#         self.pos = torch.randn(len(self.G.nodes), 2, device=device)
-#         self.pos[:,0] *= 20
-#         self.pos.requires_grad_(True)
-        
-        
         self.qualities_by_time = []
         self.i = 0
         self.runtime = 0
-        self.last_time_eval = 0 ## last time that evaluates the quality
+        self.last_time_eval = 0
         self.last_time_vis = 0
         self.iters = []
         self.loss_curve = []
         self.sample_sizes = {}
-        
         self.crossing_detector = CrossingDetector()
         self.crossing_detector_loss_fn = nn.BCELoss()
         self.crossing_pos_loss_fn = nn.BCELoss(reduction='sum')
-#         self.crossing_detector_optimizer = optim.SGD(self.crossing_detector.parameters(), lr=0.1)
         self.crossing_detector_optimizer = optim.Adam(self.crossing_detector.parameters(), lr=0.01)
-        ## filter out incident edge pairs
         self.non_incident_edge_pairs = [
-            [self.k2i[e1[0]], self.k2i[e1[1]], self.k2i[e2[0]], self.k2i[e2[1]]] 
-            for e1,e2 in itertools.product(G.edges, G.edges) 
-            if e1<e2 and len(set(e1+e2))==4
+            [self.k2i[e1[0]], self.k2i[e1[1]], self.k2i[e2[0]], self.k2i[e2[1]]]
+            for e1, e2 in itertools.product(G.edges, G.edges)
+            if e1 < e2 and len(set(e1 + e2)) == 4
         ]
-        self.device='cpu'
-        
-        
-    def grad_clamp(self, l, c, weight, optimizer, ref=1):
-        optimizer.zero_grad()
-        l.backward(retain_graph=True)
-        grad = self.pos.grad.clone()
-        grad_norm = grad.norm(dim=1)
-        is_large = grad_norm > weight*ref
-        grad[is_large] = grad[is_large] / grad_norm[is_large].view(-1,1) * weight*ref
-        self.grads[c] = grad
-                    
-        
+        self.device = device
+        self.radii = self._initialize_radii()  # 初始化半径
+
+    def _initialize_radii(self) -> torch.Tensor:
+        label_lengths = torch.tensor([len(node) for node in self.G.nodes])
+        radii = 0.02 * label_lengths + 0.1
+        return radii
+
     def optimize(self,
-        criteria_weights={'stress':1.0}, 
-        sample_sizes={'stress':128},
+        criteria_weights={'stress': 1.0}, 
+        sample_sizes={'stress': 128},
         evaluate=None,
         evaluate_interval=None,
-        evaluate_interval_unit = 'iter',
+        evaluate_interval_unit='iter',
         max_iter=int(1e4),
         time_limit=7200,
         grad_clamp=4,
         vis_interval=100,
-        vis_interval_unit = 'iter',
+        vis_interval_unit='iter',
         clear_output=False,
         optimizer_kwargs=None,
         scheduler_kwargs=None,
         criteria_kwargs=None,         
     ):
         if criteria_kwargs is None:
-            criteria_kwargs = {c:dict() for c in criteria_weights}
+            criteria_kwargs = {c: dict() for c in criteria_weights}
         self.sample_sizes = sample_sizes
+
         ## shortcut of object attributes
         G = self.G
         D, k2i = self.D, self.k2i
@@ -151,13 +101,15 @@ class GD2:
         degrees = self.degrees
         maxDegree = self.maxDegree
         device = self.device
-        
+
         self.init_sampler(criteria_weights)
-            
+
+        # 绘制初始布局
+        draw_graph_with_polygons(self.G, self.pos, self.radii, n_sides=6, title="Initial Layout")
+
         ## measure runtime
         t0 = time.time()
 
-        
         ## def optimizer
         if optimizer_kwargs.get('mode', 'SGD') == 'SGD':
             optimizer_kwargs_default = dict(
@@ -169,17 +121,12 @@ class GD2:
         elif optimizer_kwargs.get('mode', 'SGD') == 'Adam':
             optimizer_kwargs_default = dict(lr=0.0001)
             Optimizer = optim.Adam
-        for k,v in optimizer_kwargs.items():
-            if k!='mode':
+        for k, v in optimizer_kwargs.items():
+            if k != 'mode':
                 optimizer_kwargs_default[k] = v
         optimizer = Optimizer([pos], **optimizer_kwargs_default)
         
-        
-        
-#         patience = np.ceil(np.log2(len(G)+1))*100
-#         if 'stress' in criteria_weights and sample_sizes['stress'] < 16:
-#             patience += 100 * 16/sample_sizes['stress']
-        patience = np.ceil(np.log2(len(G)+1)) * 300 * max(1, 16/min(sample_sizes.values()))
+        patience = np.ceil(np.log2(len(G) + 1)) * 300 * max(1, 16 / min(sample_sizes.values()))
         patience = 20000
         scheduler_kwargs_default = dict(
             factor=0.9, 
@@ -188,7 +135,7 @@ class GD2:
             verbose=True
         )
         if scheduler_kwargs is not None:
-            for k,v in scheduler_kwargs.items():
+            for k, v in scheduler_kwargs.items():
                 scheduler_kwargs_default[k] = v
         scheduler_kwargs = scheduler_kwargs_default
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, **scheduler_kwargs)
@@ -196,9 +143,10 @@ class GD2:
         iterBar = tqdm(range(max_iter))
 
         ## smoothed loss curve during training
-        s = 0.5**(1/100) ## smoothing factor for loss curve, e.g. s=0.5**(1/100) is setting 'half-life' to 100 iterations
+        s = 0.5**(1/100)  ## smoothing factor for loss curve, e.g. s=0.5**(1/100) is setting 'half-life' to 100 iterations
         weighted_sum_of_loss, total_weight = 0, 0
         vr_target_dist, vr_target_weight = 1, 0
+            
             
         ## start training
         for iter_index in iterBar:
@@ -334,18 +282,26 @@ class GD2:
 #                     self.grad_clamp(l, c, weight, optimizer, ref)
 
 
-                elif c == 'vertex_resolution':
+#                 elif c == 'vertex_resolution':
+#                     sample = self.sample(c)
+#                     l, vr_target_dist, vr_target_weight = C.vertex_resolution(
+#                         pos, 
+#                         sample=sample, 
+#                         target=1/len(G)**0.5, 
+#                         prev_target_dist=vr_target_dist,
+#                         prev_weight=vr_target_weight
+#                     )
+#                     l = weight * l
+#                     loss += l
+# #                     self.grad_clamp(l, c, weight, optimizer, ref)
+
+                elif c == 'vertex_resolution':  # Replacing the original vertex_resolution
                     sample = self.sample(c)
-                    l, vr_target_dist, vr_target_weight = C.vertex_resolution(
-                        pos, 
-                        sample=sample, 
-                        target=1/len(G)**0.5, 
-                        prev_target_dist=vr_target_dist,
-                        prev_weight=vr_target_weight
+                    radii = self._initialize_radii()  # Ensure radii are initialized
+                    l = weight * C.node_overlap(
+                        pos, radii, sample_size=sample_sizes[c], sample=sample
                     )
-                    l = weight * l
                     loss += l
-#                     self.grad_clamp(l, c, weight, optimizer, ref)
 
 
                 elif c == 'gabriel':
@@ -358,13 +314,7 @@ class GD2:
                     loss += l
 #                     self.grad_clamp(l, c, weight, optimizer, ref)
 
-                elif c == 'vertex_resolution':  # Replacing the original vertex_resolution
-                    sample = self.sample(c)
-                    radii = self._initialize_radii()  # Ensure radii are initialized
-                    l = weight * C.node_overlap(
-                        pos, radii, sample_size=sample_sizes[c], sample=sample
-                    )
-                    loss += l
+
 
                 else:
                     print(f'Criteria not supported: {c}')
