@@ -15,20 +15,33 @@ import torch
 import numpy as np
 import networkx as nx
 from torch import nn
+import torch
 
-def calculate_stress(points: torch.Tensor, G: nx.Graph) -> float:
-    D = nx.floyd_warshall_numpy(G)
-    W = 1 / (D ** 2 + 1e-6)
-    pos = points.detach().numpy()
-    dist = np.linalg.norm(pos[:, np.newaxis, :] - pos[np.newaxis, :, :], axis=-1)
-    stress = np.sum(W * (dist - D) ** 2)
-    return stress
+def stress(pos, D, W, sampleSize=None, sample=None, reduce='mean'):
+    n, m = pos.shape
+    if sample is None:
+        x0 = pos.repeat(1, n).view(-1, m)
+        x1 = pos.repeat(n, 1)
+        D = torch.from_numpy(D).view(-1)
+        W = torch.from_numpy(W).view(-1)
+    else:
+        indices = sample[:, 0] * n + sample[:, 1]
+        x0 = pos[sample[:, 0]]
+        x1 = pos[sample[:, 1]]
+        D = torch.from_numpy(D).view(-1)[indices]
+        W = torch.from_numpy(W).view(-1)[indices]
 
-def calculate_node_overlap(points: torch.Tensor, radii: torch.Tensor) -> float:
-    pairwise_distance = torch.cdist(points, points)
-    normalized_dist = pairwise_distance / (radii[:, None] + radii[None, :])
-    overlap = torch.clamp(1 - normalized_dist, min=0).pow(2).mean().item()
-    return overlap
+    dist = torch.norm(x0 - x1, dim=1)
+    diff = dist - D
+    loss = W * diff ** 2
+
+    if reduce == 'mean':
+        return loss.mean()
+    elif reduce == 'sum':
+        return loss.sum()
+    else:
+        return loss
+
 
     
 # def crossings(pos, G, k2i, sampleSize, sampleOn='edges', reg_coef=1, niter=30):
@@ -407,41 +420,5 @@ def ideal_edge_length(pos, G, k2i, targetLengths=None, sampleSize=None, sample=N
         return eu.sum()
     elif reduce == 'mean':
         return eu.mean()
-
-
-
-
-def stress(pos, D, W, sampleSize=None, sample=None, reduce='mean'):
-    if sample is None:
-        n,m = pos.shape[0], pos.shape[1]
-        if sampleSize is not None:
-            i0 = np.random.choice(n, sampleSize)
-            i1 = np.random.choice(n, sampleSize)
-            x0 = pos[i0,:]
-            x1 = pos[i1,:]
-            
-        
-            D = torch.tensor([D[i,j] for i, j in zip(i0, i1)])
-            W = torch.tensor([W[i,j] for i, j in zip(i0, i1)])
-        else:
-            x0 = pos.repeat(1, n).view(-1,m)
-            x1 = pos.repeat(n, 1)
-            D = D.view(-1)
-            W = W.view(-1)
-    else:
-        x0 = pos[sample[:,0],:]
-        x1 = pos[sample[:,1],:]
-        D = torch.tensor([D[i,j] for i, j in sample])
-        W = torch.tensor([W[i,j] for i, j in sample])
-    pdist = nn.PairwiseDistance()(x0, x1)
-#     wbound = (1/4 * diff.abs().min()).item()
-#     W.clamp_(0, wbound)
-    
-    res = W*(pdist-D)**2
-    
-    if reduce == 'sum':
-        return res.sum()
-    elif reduce == 'mean':
-        return res.mean()
 
 
