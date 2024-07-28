@@ -18,6 +18,7 @@ import numpy as np
 import networkx as nx
 from torch import nn
 
+
 def calculate_stress(points: torch.Tensor, G: nx.Graph) -> float:
     D = nx.floyd_warshall_numpy(G)
     W = 1 / (D ** 2 + 1e-6)
@@ -31,6 +32,7 @@ def calculate_node_overlap(points: torch.Tensor, radii: torch.Tensor) -> float:
     normalized_dist = pairwise_distance / (radii[:, None] + radii[None, :])
     overlap = torch.clamp(1 - normalized_dist, min=0).pow(2).mean().item()
     return overlap
+
 def stress(pos, D, W, sampleSize=None):
     return C.stress(pos, D, W, sampleSize, reduce='mean').item()
 

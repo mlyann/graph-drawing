@@ -1,6 +1,7 @@
 from utils import utils
 from utils import vis as V
 from utils.CrossingDetector import CrossingDetector
+from graph_with_polygons import draw_graph_with_polygons  # Import the function at the top
 
 
 import criteria as C
