@@ -187,9 +187,26 @@ def gabriel(pos, G, k2i, sampleSize=None):
         
         
         
-        
-        
-        
+def node_overlap(pos, radii, sampleSize=None):
+    pairwise_distance = nn.PairwiseDistance()
+    relu = nn.ReLU()
+
+    n = pos.shape[0]
+    if sampleSize is not None:
+        indices = torch.randperm(n)[:sampleSize]
+    else:
+        indices = torch.arange(n)
+    
+    a = pos[indices[:, None]]
+    b = pos[indices]
+    radii_a = radii[indices[:, None]]
+    radii_b = radii[indices]
+    pdist = pairwise_distance(a, b)
+
+    normalized_dist = pdist / (radii_a + radii_b)
+    loss = relu(1 - normalized_dist).pow(2).mean()
+
+    return loss.item()
         
         
         
