@@ -3,7 +3,6 @@ from utils import vis as V
 from utils.CrossingDetector import CrossingDetector
 from graph_with_polygons import draw_graph_with_polygons  # Import the function at the top
 
-
 import criteria as C
 import quality as Q
 
@@ -65,7 +64,7 @@ class GD2:
             if e1 < e2 and len(set(e1 + e2)) == 4
         ]
         self.device = device
-        self.radii = self._initialize_radii()  # 初始化半径
+        self.radii = self._initialize_radii()  # Initialize radii
 
     def _initialize_radii(self) -> torch.Tensor:
         label_lengths = torch.tensor([len(node) for node in self.G.nodes])
@@ -119,7 +118,7 @@ class GD2:
                 nesterov=True
             )
             Optimizer = optim.SGD
-        elif optimizer_kwargs.get('mode', 'SGD') == 'Adam':
+        elif optimizer_kwargs.get('mode', 'Adam') == 'Adam':
             optimizer_kwargs_default = dict(lr=0.0001)
             Optimizer = optim.Adam
         for k, v in optimizer_kwargs.items():
@@ -148,7 +147,6 @@ class GD2:
         weighted_sum_of_loss, total_weight = 0, 0
         vr_target_dist, vr_target_weight = 1, 0
             
-            
         ## start training
         for iter_index in iterBar:
             t0 = time.time()
@@ -169,9 +167,6 @@ class GD2:
                         pos, D, W, 
                         sample=sample, reduce='mean')
                     loss += l
-#                     self.grad_clamp(l, c, weight, optimizer, ref)
-
-                    
                     
                 elif c == 'ideal_edge_length':
                     sample = self.sample(c)
@@ -181,9 +176,6 @@ class GD2:
                         reduce='mean',
                     )
                     loss += l
-#                     self.grad_clamp(l, c, weight, optimizer, ref)
-
-                    
 
                 elif c == 'neighborhood_preservation':
                     sample = self.sample(c).tolist()
@@ -192,39 +184,24 @@ class GD2:
                         k2i, i2k, 
                         degrees, maxDegree,
                         sample=sample,
-#                         n_roots=sample_sizes[c], 
                         depth_limit=2
                     )
                     loss += l
-#                     self.grad_clamp(l, c, weight, optimizer, ref)
-
 
                 elif c == 'crossings':
-
                     ## neural crossing detector
                     sample = self.sample(c)
                     sample = torch.stack(sample, 1)
                     edge_pair_pos = self.pos[sample].view(-1,8)
                     labels = utils.are_edge_pairs_crossed(edge_pair_pos)
                     
-#                     edge_pair_pos = self.pos[sample].view(-1,8)
-#                     labels = utils.are_edge_pairs_crossed(edge_pair_pos)
-#                     if labels.sum() < 1:
-#                         sample = torch.cat([sample, self.sample_crossings(c)], dim=0)
-#                         edge_pair_pos = self.pos[sample].view(-1,8)
-#                         labels = utils.are_edge_pairs_crossed(edge_pair_pos)   
-                        
-                        
                     ## train crossing detector
                     self.crossing_detector.train()
                     for _ in range(2):
                         preds = self.crossing_detector(edge_pair_pos.detach().to(device)).view(-1)
                         loss_nn = self.crossing_detector_loss_fn(
                             preds, 
-                            (
-#                                 labels.float()*0.7+0.15 + 0.10*(2*torch.rand(labels.shape)-1)
-                                labels.float()
-                            ).to(device)
+                            labels.float().to(device)
                         )
                         self.crossing_detector_optimizer.zero_grad()
                         loss_nn.backward()
@@ -233,9 +210,8 @@ class GD2:
                     ## loss of crossing
                     self.crossing_detector.eval()
                     preds = self.crossing_detector(edge_pair_pos.to(device)).view(-1)
-                    l = weight * self.crossing_pos_loss_fn(preds, (labels.float()*0).to(device))
+                    l = weight * self.crossing_pos_loss_fn(preds, labels.float().to(device))
                     loss += l
-#                     self.grad_clamp(l, c, weight, optimizer, ref)
                     
                 elif c == 'crossing_angle_maximization':
                     sample = self.sample(c)
@@ -251,50 +227,25 @@ class GD2:
                         pos, G, k2i, i2k,
                         sample = sample,
                         sample_labels = sample_labels,
-#                         sampleSize=sample_sizes[c], 
-#                         sampleOn='crossings') ## SLOW for large sample size
-#                         sampleOn='edges'
                     )
                     loss += l
-#                     self.grad_clamp(l, c, weight, optimizer, ref)
-
 
                 elif c == 'aspect_ratio':
                     sample = self.sample(c)
                     l = weight * C.aspect_ratio(
                         pos, sample=sample,
                         **criteria_kwargs.get(c)
-#                         sampleSize=sample_sizes[c],
                     )
                     loss += l
-#                     self.grad_clamp(l, c, weight, optimizer, ref)
-
 
                 elif c == 'angular_resolution':
-#                     sample = [self.i2k[i.item()] for i in self.sample(c)]
                     sample = self.sample(c)
                     l = weight * C.angular_resolution(
                         pos, G, k2i, 
                         sampleSize=sample_sizes[c],
                         sample=sample,
                     )
-                    
                     loss += l
-#                     self.grad_clamp(l, c, weight, optimizer, ref)
-
-
-#                 elif c == 'vertex_resolution':
-#                     sample = self.sample(c)
-#                     l, vr_target_dist, vr_target_weight = C.vertex_resolution(
-#                         pos, 
-#                         sample=sample, 
-#                         target=1/len(G)**0.5, 
-#                         prev_target_dist=vr_target_dist,
-#                         prev_weight=vr_target_weight
-#                     )
-#                     l = weight * l
-#                     loss += l
-# #                     self.grad_clamp(l, c, weight, optimizer, ref)
 
                 elif c == 'vertex_resolution':  # Replacing the original vertex_resolution
                     sample = self.sample(c)
@@ -304,26 +255,16 @@ class GD2:
                     )
                     loss += l
 
-
                 elif c == 'gabriel':
                     sample = self.sample(c)
                     l = weight * C.gabriel(
                         pos, G, k2i, 
                         sample=sample,
-#                         sampleSize=sample_sizes[c],
                     )
                     loss += l
-#                     self.grad_clamp(l, c, weight, optimizer, ref)
-
-
 
                 else:
                     print(f'Criteria not supported: {c}')
-#             if len(self.grads) > 0:
-#                 pos.grad = sum(g for c,g in self.grads.items())
-#                 pos.grad.clamp_(-grad_clamp, grad_clamp)
-#                 optimizer.step()
-#                 ref = pos.grad.norm(dim=1).max()
 
             optimizer.zero_grad()
             loss.backward()
@@ -350,8 +291,6 @@ class GD2:
                     self.runtime - self.last_time_vis>= vis_interval
                 ))
             ):
-#             if vis_interval is not None and vis_interval>0 \
-#             and self.i%vis_interval==vis_interval-1:
                 pos_numpy = pos.detach().cpu().numpy()
                 pos_G = {k:pos_numpy[k2i[k]] for k in G.nodes}
                 if display is not None and clear_output:
@@ -366,10 +305,6 @@ class GD2:
                 )
                 self.last_time_vis = self.runtime
 
-
-#             if loss.isnan():
-#                 raise Exception('loss is nan')
-#                 break
             if pos.isnan().any():
                 raise Exception('pos is nan')
                 break
@@ -386,7 +321,6 @@ class GD2:
                 self.iters.append(self.i)
                 if scheduler is not None:
                     scheduler.step(self.loss_curve[-1])
-
 
             lr = optimizer.param_groups[0]['lr']
             if lr <= scheduler.min_lrs[0]:
@@ -462,10 +396,6 @@ class GD2:
                     shuffle=True
                 )
             elif c == 'angular_resolution':
-#                 self.dataloaders[c] = DataLoader(
-#                     range(len(self.G.nodes)), 
-#                     batch_size=self.sample_sizes[c],
-#                     shuffle=True)
                 self.dataloaders[c] = DataLoader(
                     self.incident_edge_pairs, 
                     batch_size=self.sample_sizes[c],
@@ -492,7 +422,6 @@ class GD2:
             crossing_segs = utils.find_crossings(self.pos, list(self.G.edges), self.k2i)
             self.crossing_loaders[c] = DataLoader(crossing_segs, batch_size=self.sample_sizes[c])
             self.crossing_samplers[c] = iter(self.crossing_loaders[c])
-#             print(f'finding new crossings...{crossing_segs.shape}')
         try:
             sample = next(self.crossing_samplers[c])
         except StopIteration:
@@ -601,5 +530,3 @@ class GD2:
                 loss_curve=self.loss_curve,
                 qualities_by_time = self.qualities_by_time,
             ), f)
-        
-    
